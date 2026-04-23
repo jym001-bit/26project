@@ -69,6 +69,67 @@ public class CatchClient {
         //返回
         return r;
     }
+    //线程池
+    private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
+
+    //redis使用的是单线程 自定义锁 获取锁
+    private boolean tryLockShop(String key) {
+        Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", 10, TimeUnit.SECONDS);
+        return BooleanUtil.isTrue(flag);
+
+    }
+    //释放锁
+    private void unLockShop(String key) {
+        stringRedisTemplate.delete(key);
+    }
+
+    public <R,ID>R queryWithLogicalExpire(String keyPrefix,ID id,Class<R>type,Function<ID,R> dbFallback, Long time, TimeUnit unit){
+
+        String key = keyPrefix + id;
+
+        //1.从redis查询商品缓存
+        String shopJson = stringRedisTemplate.opsForValue().get(key);
+
+        //存在吗
+        if (StrUtil.isBlank(shopJson))
+        {
+            //不存在，return
+            return null;
+        }
+        //存在 JSON 反序列化对象
+        RedisData redisData = JSONUtil.toBean(shopJson, RedisData.class);
+        JSONObject data =(JSONObject) redisData.getData();
+
+        R r = JSONUtil.toBean(data, type);
+        LocalDateTime expireTime = redisData.getExpireTime();
+
+        //判断是否过期
+        if(expireTime.isAfter(LocalDateTime.now())){
+            //之后 未过期 当前时间在expireTime之后
+            return r;
+        }
+        //过期
+        //缓存重建 建立互斥锁
+        String lockKey = LOCK_SHOP_KEY + id;
+        boolean isLock = tryLockShop(lockKey);
+        if (isLock){
+            CACHE_REBUILD_EXECUTOR.submit(()->{
+                try {
+                    R r1 = dbFallback.apply(id);
+                    this.setWithLogicalExpire(key,r1,time,unit);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                } finally {
+                    //释放锁
+                    unLockShop(lockKey);
+                }
+
+            });
+        }
+
+        //返回
+        return r;
+    }
 
 
 }
