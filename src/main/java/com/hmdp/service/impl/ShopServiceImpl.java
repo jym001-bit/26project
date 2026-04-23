@@ -9,6 +9,7 @@ import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
 import com.hmdp.service.IShopService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.hmdp.utils.CatchClient;
 import com.hmdp.utils.RedisData;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -31,17 +32,24 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+
+    @Resource
+    private CatchClient catchClient;
     @Override
     public Result queryById(Long id) {
-         //缓存穿透
+        //使用工具类 解决缓存穿透
+            //Shop shop = catchClient.queryWithPassThrough(CACHE_SHOP_KEY,id,Shop.class,id2 -> getById(id2),CACHE_SHOP_TTL,TimeUnit.MINUTES);
+        //使用工具类结局缓存击穿
+       //Shop shop =  catchClient.queryWithLogicalExpire(CACHE_SHOP_KEY,id,Shop.class,id2 -> getById(id2),CACHE_SHOP_TTL,TimeUnit.MINUTES);
+        //缓存穿透
         //Shop shop = queryWithPassThrough(id);
         //互斥锁解决缓存击穿与缓存穿透
-        //Shop shop = queryWithMutex(id);
+        Shop shop = queryWithMutex(id);
 
         //逻辑过期解决缓存击穿&&
-        Shop shop = queryWithLogicalExpire(id);
+        //Shop shop = queryWithLogicalExpire(id);
         if(shop==null){
-            Result.fail("店铺不存在");
+           return Result.fail("店铺不存在");
         }
 
         return Result.ok(shop);
@@ -93,6 +101,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             }
             //存在，写入redis用String json格式,设置 30min 有效期
             stringRedisTemplate.opsForValue().set(key,JSONUtil.toJsonStr(shop),CACHE_SHOP_TTL, TimeUnit.MINUTES);
+            return shop;
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         } finally {
@@ -101,8 +110,6 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         }
 
 
-        //返回
-        return shop;
     }
     //线程池
     private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
