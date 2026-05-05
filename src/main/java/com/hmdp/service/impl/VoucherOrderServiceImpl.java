@@ -65,7 +65,14 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             //不是0
             return Result.fail(r == 1 ?"库存不足" : "不能重复下单");
         }
-
+        //订单
+        VoucherOrder voucherOrder = new VoucherOrder();
+        //订单id
+        Long id = redisIdWorker.nextId("id");
+        //用户id
+        voucherOrder.setUserId(userId);
+        //订单id
+        voucherOrder.setId(id);
 
         //为0，下单信息保存到阻塞队列
         long orderId = redisIdWorker.nextId("order");
