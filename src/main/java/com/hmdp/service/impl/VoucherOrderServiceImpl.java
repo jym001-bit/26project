@@ -11,6 +11,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisIdWorker;
 import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
+import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.aop.framework.AopContext;
@@ -22,11 +23,13 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.concurrent.*;
 
-
+@Slf4j
 @Service
 public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, VoucherOrder> implements IVoucherOrderService {
 
@@ -118,8 +121,12 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
         //为0，下单信息保存到阻塞队列
         long orderId = redisIdWorker.nextId("order");
+        orderTasks.add(voucherOrder);
+
+        //获取代理
+         proxy = (IVoucherOrderService)AopContext.currentProxy();
         //返回订单id
-        return Result.ok(0);
+        return Result.ok(orderId);
 
 
     }
@@ -182,16 +189,16 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
 
     @Transactional()
-    public  Result createVoucherOrder(Long voucherId) {
+    public  void createVoucherOrder(VoucherOrder voucherOrder) {
         //一人一单判断
         //查询订单
         Long userId = UserHolder.getUser().getId();
-        int count = query().eq("user_id", userId).eq("voucher_id", voucherId).count();
+        int count = query().eq("user_id", userId).eq("voucher_id", voucherOrder.getVoucherId()).count();
         //判断是否存在
         if (count > 0) {
             //存在
             //用户已经下单了
-            return Result.fail("用户已经购买过一次了");
+            log.error("用户已经购买过一次了");
         }
         //下单
         //解决超卖问题
@@ -199,26 +206,16 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         boolean success = seckillVoucherService.update()
                 .setSql("stock = stock - 1")
                 .gt("stock", 0)
-                .eq("voucher_id", voucherId)
+                .eq("voucher_id", voucherOrder.getVoucherId())
                 .update();
         //创建订单
         if(!success){
             //扣减失败
-            return Result.fail("库存不足！");
+            log.error("库存不足");
+            return;
         }
 
-        //返回订单ID 创建订单
-        VoucherOrder voucherOrder = new VoucherOrder();
-        //订单ID
-        long orderId = redisIdWorker.nextId("order");
-        voucherOrder.setId(orderId);
-        //用户ID获取
 
-        voucherOrder.setUserId(userId);
-        //订单卷ID
-        voucherOrder.setVoucherId(voucherId);
-        //订单新增
         save(voucherOrder);
-        return Result.ok(orderId);
     }
 }
