@@ -49,6 +49,46 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     }
     //阻塞队列
     private BlockingQueue<VoucherOrder> orderTasks = new ArrayBlockingQueue<>(1024 * 1024);
+    private static final ExecutorService EXECUTOR_ORDER_SERVICE = Executors.newFixedThreadPool(10);//线程池
+    //类初始化，执行线程池
+    @PostConstruct
+    public void init() {
+        EXECUTOR_ORDER_SERVICE.submit(new VoucherOrderHandler());
+    }
+    private class VoucherOrderHandler implements Runnable {
+
+        @Override
+        public void run() {
+            try {
+                while (true) {
+                    //获取订单信息
+                    VoucherOrder voucherOrder = orderTasks.take();//有元素采取阻塞
+                    //创建订单
+                    handleVoucherOrder(voucherOrder);
+                }
+            } catch (InterruptedException e) {
+                log.error("处理订单异常",e);
+            }
+        }
+    }
+    private void  handleVoucherOrder(VoucherOrder voucherOrder) {
+        Long userId = voucherOrder.getUserId();
+        RLock lock = redissonClient.getLock("lock:order:" + userId);
+        //获取锁
+        boolean isLock = lock.tryLock();
+        if (isLock) {
+            //获取锁失败
+            log.error("不允许重复下单");
+            return;
+        }
+        try {
+
+             proxy.createVoucherOrder(voucherOrder);//创建订单
+        }catch (Exception e){
+
+        }
+    }
+    private IVoucherOrderService proxy;
     @Override
     public Result seckillVoucher(Long voucherId) {
 
