@@ -46,6 +46,58 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         return Result.ok(records);
     }
 
+    @Override
+    public Result likeBlog(Long id) {
+        //判断当前用户是否点赞
+        Long userId = UserHolder.getUser().getId();
+        String key = BLOG_LIKED_KEY + id;
+        //是否点赞
+        Double score = stringRedisTemplate.opsForZSet().score(key, userId.toString());
+        //score时间戳
+        if(score==null)
+            {
+                //未点赞 数据库 + 1 保存到redis集合set
+                boolean success = update().setSql("liked = liked + 1")
+                        .eq("id", id).update();
+                if (success) { //key value 时间戳
+                    stringRedisTemplate.opsForZSet().add(key, userId.toString(),System.currentTimeMillis());
+                }
+            }else {
+            //已经点赞
+            //数据库 - 1 从redis中移除
+            boolean success = update().setSql("liked = liked - 1")
+                    .eq("id", id).update();
+            if (success) {
+                stringRedisTemplate.opsForZSet().remove(key, userId.toString());
+            }
+        }
+        return Result.ok();
+
+
+    }
+
+    @Override
+    public Result queryBlogLikes(Long id) {
+        String key = BLOG_LIKED_KEY + id;
+        //查询点赞top5用户 key 0 4
+        Set<String> top5 = stringRedisTemplate.opsForZSet().range(key, 0, 4);
+        if(top5==null|| top5.isEmpty()){
+            return Result.ok(Collections.emptyList());
+        }
+        //解析用户id 使用map映射将string转成Long再变成集合
+        List<Long> ids = top5.stream().map(Long::valueOf).collect(Collectors.toList());
+        String idStr = StrUtil.join(",", ids);
+        //根据id查询用户
+        Stream<UserDTO> userDTOS = userService.query()
+                .in("id",ids)
+                .last("ORDER BY FIELD(id," + idStr + ")")
+                .list()
+                .stream()
+                .map(user -> BeanUtil.copyProperties(user, UserDTO.class));
+
+        return Result.ok(userDTOS);
+    }
+
     private void queryBlogUser(Blog blog) {
         Long userId = blog.getUserId();
         User user = userService.getById(userId);
