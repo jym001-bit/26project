@@ -58,7 +58,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         }
         //判断当前用户是否点赞
         Long userId = UserHolder.getUser().getId();
-        String key = "blog:like:" + blog.getId();
+        String key = BLOG_LIKED_KEY + blog.getId();
         //是否点赞
         Double score = stringRedisTemplate.opsForZSet().score(key, userId.toString());
         blog.setIsLike(score != null);
